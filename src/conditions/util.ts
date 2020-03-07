@@ -2,6 +2,7 @@ import { JSONPath } from 'jsonpath-plus';
 
 import { TrueCondition } from './TrueCondition';
 import { EqualsCondition } from './EqualsCondition';
+import { LooseEqualsCondition } from './LooseEqualsCondition';
 import { NotEqualsCondition } from './NotEqualsCondition';
 import { NotCondition } from './NotCondition';
 import { ListContainsCondition } from './ListContainsCondition';
@@ -15,6 +16,7 @@ export class ConditionUtil {
     public static readonly AND = new AndCondition();
     public static readonly TRUE = new TrueCondition();
     public static readonly EQUALS = new EqualsCondition();
+    public static readonly LOOSE_EQUALS = new LooseEqualsCondition();
     public static readonly LIST_CONTAINS = new ListContainsCondition();
     public static readonly NOT_EQUALS = new NotEqualsCondition();
     public static readonly NOT = new NotCondition();
