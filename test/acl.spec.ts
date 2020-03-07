@@ -562,6 +562,21 @@ describe('Test Suite: Access Control', function () {
         expect((ac.can('user').context(categorySportsContext).execute('create').sync().on('article')).granted).toEqual(true);
         expect((ac.can('user').context({ category: 'tech' }).execute('create').sync().on('article')).granted).toEqual(false);
     });
+    it('should grant access with loose_equals condition with single and check permissions synchronously', function () {
+        const ac = this.ac;
+
+        ac.grant('user').condition(
+            {
+                Fn: 'LOOSE_EQUALS',
+                args: {
+                    'count': '1'
+                }
+            }).execute('create').on('article');
+        expect((ac.can('user').context({ count: '1' }).execute('create').sync().on('article')).granted).toEqual(true);
+        expect((ac.can('user').context({ count: 1 }).execute('create').sync().on('article')).granted).toEqual(true);
+        expect((ac.can('user').context({ count: 2 }).execute('create').sync().on('article')).granted).toEqual(false);
+        expect((ac.can('user').context({ count: '2' }).execute('create').sync().on('article')).granted).toEqual(false);
+    });
 
     it('should grant access with not equals condition with list of values and check permissions', async function () {
         const ac = this.ac;
