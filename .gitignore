@@ -61,6 +61,6 @@ typings/
 .vscode
 
 #compiled output
-lib/
+# lib/
 bundle.js
 role-acl.js
