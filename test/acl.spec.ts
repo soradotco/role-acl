@@ -1022,6 +1022,21 @@ describe('Test Suite: Access Control', function () {
         expect((await ac.can('user').context({ tags: ['politics'] }).execute('create').on('article')).granted).toEqual(false);
     });
 
+    it('should grant access with list contains condition on single value and check permissions - json path', async function () {
+        const ac = this.ac;
+
+        ac.grant('user').condition(
+            {
+                Fn: 'LIST_CONTAINS',
+                args: {
+                    '$.user.tags': '$.instance.type'
+                }
+            }).execute('create').on('article');
+        expect((await ac.can('user').context({ user:{ tags: ['sports'] }, instance: { type: 'sports' } }).execute('create').on('article')).granted).toEqual(true);
+        expect((await ac.can('user').context({ user: { tags: ['politics'] } }).execute('create').on('article')).granted).toEqual(false);
+    });
+        console.log('hello')
+
     it('should grant access with list contains condition on single value and check permissions synchronously', function () {
         const ac = this.ac;
 
