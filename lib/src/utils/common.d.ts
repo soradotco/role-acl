@@ -100,7 +100,7 @@ export declare class CommonUtil {
      *  @throws {Error}
      *          If a role is extended by itself or a non-existent role.
      */
-    static extendRole(grants: any, roles: string | string[], extenderRoles: string | string[], condition?: ICondition): Promise<void>;
+    static extendRole(grants: any, roles: string | string[], extenderRoles: string | string[], condition?: ICondition): void;
     static extendRoleSync(grants: any, roles: string | string[], extenderRoles: string | string[], condition?: ICondition): void;
     static matchesAllElement(values: any, predicateFn: (elm: any) => boolean): boolean;
     static matchesAnyElement(values: any, predicateFn: (elm: any) => boolean): boolean;

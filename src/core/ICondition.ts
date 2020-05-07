@@ -14,7 +14,7 @@ export interface IStandardCondition {
 }
 
 export interface IFunctionCondition {
-    (context: any): boolean | Promise<boolean>;
+    (context: any, args?: any): boolean | Promise<boolean>;
 }
 
-export type ICondition = IStandardCondition | IFunctionCondition;
+export type ICondition = string | IStandardCondition | IFunctionCondition;

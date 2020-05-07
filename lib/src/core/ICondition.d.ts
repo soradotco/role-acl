@@ -10,6 +10,6 @@ export interface IStandardCondition {
     args: string | string[] | IDictionary<any> | IStandardCondition | IStandardCondition[];
 }
 export interface IFunctionCondition {
-    (context: any): boolean | Promise<boolean>;
+    (context: any, args?: any): boolean | Promise<boolean>;
 }
-export declare type ICondition = IStandardCondition | IFunctionCondition;
+export declare type ICondition = string | IStandardCondition | IFunctionCondition;

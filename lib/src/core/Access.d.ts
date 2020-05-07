@@ -92,7 +92,7 @@ declare class Access {
     attributes(value: string | string[]): Access;
     /**
      *  Sets condition for this `Access` instance.
-     *  @param {ICondition} value
+     *  @param {ICondition | string | Function} value
      *         Conditions to be set.
      *  @returns {Access}
      *           Self instance of `Access`.
@@ -105,7 +105,7 @@ declare class Access {
      *  @returns {Access}
      *           Self instance of `Access`.
      */
-    extend(roles: string | string[]): Promise<Access>;
+    extend(roles: string | string[]): Access;
     /**
      *  Sets the roles to be extended for this `Access` instance.
      *  @param {String|Array<String>} roles

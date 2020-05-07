@@ -1,4 +1,4 @@
-import { IConditionFunction } from './IConditionFunction';
+import { IConditionFunction } from "./IConditionFunction";
 /**
  * List contains condition
  *

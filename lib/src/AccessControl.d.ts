@@ -1,4 +1,4 @@
-import { Access, IAccessInfo, ICondition, Query, IQueryInfo, Permission } from './core';
+import { Access, IAccessInfo, ICondition, IDictionary, Query, IQueryInfo, Permission, IFunctionCondition } from "./core";
 /**
  *  @classdesc
  *  AccessControl class that implements RBAC (Role-Based Access Control) basics
@@ -68,12 +68,13 @@ declare class AccessControl {
     private _grants;
     /**
      *  Initializes a new instance of `AccessControl` with the given grants.
-     *  @ignore
      *
      *  @param {Object|Array} grants - A list containing the access grant
      *      definitions. See the structure of this object in the examples.
+     *
+     *  @param {Object} customConditionFns - custom condition functions
      */
-    constructor(grants?: any);
+    constructor(grants?: any, customConditionFns?: IDictionary<IFunctionCondition>);
     /**
      *  Gets the internal grants object that stores all current grants.
      *
@@ -118,7 +119,7 @@ declare class AccessControl {
      *  @throws {Error}
      *          If a role is extended by itself or a non-existent role.
      */
-    extendRole(roles: string | string[], extenderRoles: string | string[], condition?: ICondition): Promise<AccessControl>;
+    extendRole(roles: string | string[], extenderRoles: string | string[], condition?: ICondition): AccessControl;
     extendRoleSync(roles: string | string[], extenderRoles: string | string[], condition?: ICondition): AccessControl;
     /**
      *  Removes all the given role(s) and their granted permissions, at once.
@@ -149,11 +150,11 @@ declare class AccessControl {
      */
     hasRole(role: string): boolean;
     /**
-    *  Get allowed grants when conditions are skipped
-     return CommonUtil.getUnionGrantsOfRoles(this._grants, query);
-
-    *  @returns {IAccessInfo[]} - grants
-    */
+      *  Get allowed grants when conditions are skipped
+       return CommonUtil.getUnionGrantsOfRoles(this._grants, query);
+  
+      *  @returns {IAccessInfo[]} - grants
+      */
     allowedGrants(query: IQueryInfo): Promise<any[]>;
     allowedGrantsSync(query: IQueryInfo): any[];
     /**
@@ -307,19 +308,16 @@ declare class AccessControl {
      * Converts grants object to JSON format
      */
     toJSON(): string;
+    registerConditionFunction(funtionName: string, fn: IFunctionCondition): AccessControl;
     /**
      *  @private
      */
     private _each;
     /**
-     *  @private
-     */
-    private _eachRole;
-    /**
      *  Documented separately in AccessControlError
      *  @private
      */
-    static readonly Error: any;
+    static get Error(): any;
     /**
      *  A utility method for deep cloning the given data object(s) while
      *  filtering its properties by the given attribute (glob) notations.

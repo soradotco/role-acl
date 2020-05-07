@@ -1,52 +1,167 @@
-import { JSONPath } from 'jsonpath-plus';
+import { JSONPath } from "jsonpath-plus";
+import flattendeep from 'lodash.flattendeep';
 
-import { TrueCondition } from './TrueCondition';
-import { EqualsCondition } from './EqualsCondition';
+
+import { TrueCondition as TrueConditionFunction } from "./TrueCondition";
+import { EqualsCondition as EqualsConditionFucntion } from "./EqualsCondition";
 import { LooseEqualsCondition } from './LooseEqualsCondition';
-import { NotEqualsCondition } from './NotEqualsCondition';
-import { NotCondition } from './NotCondition';
-import { ListContainsCondition } from './ListContainsCondition';
-import { OrCondition } from './OrCondition';
-import { AndCondition } from './AndCondition';
-import { StartsWithCondition } from './StartsWithCondition';
-import { IConditionFunction } from './IConditionFunction';
-import { AccessControlError, ICondition } from '../core';
+import { NotEqualsCondition as NotEqualsConditionFunction } from "./NotEqualsCondition";
+import { NotCondition as NotConditionFunction } from "./NotCondition";
+import { ListContainsCondition as ListContainsConditionFunction } from "./ListContainsCondition";
+import { OrCondition as OrConditionFunction } from "./OrCondition";
+import { AndCondition as AndConditionFunction } from "./AndCondition";
+import { StartsWithCondition } from "./StartsWithCondition";
+import { IConditionFunction } from "./IConditionFunction";
+import {
+  AccessControlError,
+  ICondition,
+  IDictionary,
+  IFunctionCondition,
+} from "../core";
 
 export class ConditionUtil {
-    public static readonly AND = new AndCondition();
-    public static readonly TRUE = new TrueCondition();
-    public static readonly EQUALS = new EqualsCondition();
-    public static readonly LOOSE_EQUALS = new LooseEqualsCondition();
-    public static readonly LIST_CONTAINS = new ListContainsCondition();
-    public static readonly NOT_EQUALS = new NotEqualsCondition();
-    public static readonly NOT = new NotCondition();
-    public static readonly OR = new OrCondition();
-    public static readonly STARTS_WITH = new StartsWithCondition();
+  public static readonly AND = new AndConditionFunction();
+  public static readonly TRUE = new TrueConditionFunction();
+  public static readonly EQUALS = new EqualsConditionFucntion();
+  public static readonly LOOSE_EQUALS = new LooseEqualsCondition();
+  public static readonly LIST_CONTAINS = new ListContainsConditionFunction();
+  public static readonly NOT_EQUALS = new NotEqualsConditionFunction();
+  public static readonly NOT = new NotConditionFunction();
+  public static readonly OR = new OrConditionFunction();
+  public static readonly STARTS_WITH = new StartsWithCondition();
+  private static _customConditionFunctions: IDictionary<
+    IFunctionCondition
+  > = {};
 
-    public static evaluate(condition: ICondition, context): boolean | Promise<boolean> {
-        if (!condition) {
-            return true;
-        }
-
-        if (typeof condition === 'function') {
-            return condition(context);
-        }
-
-        if (typeof condition === 'object') {
-            if (!ConditionUtil[condition.Fn]) {
-                throw new AccessControlError(`Condition function:${condition.Fn} not found`)
-            }
-            return (ConditionUtil[condition.Fn] as IConditionFunction).evaluate(condition.args, context);
-        }
-
-        return false;
+  public static registerCustomConditionFunction(
+    functionName: string,
+    fn: IFunctionCondition
+  ) {
+    if (!functionName) {
+      throw new AccessControlError(
+        `Condition function name:${functionName} is not valid`
+      );
     }
 
-    public static getValueByPath(context: any, valuePathOrValue: any) {
-        // Check if the value is JSONPath
-        if (typeof valuePathOrValue === 'string' && valuePathOrValue.startsWith('$.')) {
-            return JSONPath({ path: valuePathOrValue, json: context, wrap: false });
-        }
-        return valuePathOrValue;
+    if (!functionName.startsWith("custom:")) {
+      functionName = "custom:" + functionName;
     }
+    if (ConditionUtil._customConditionFunctions[functionName]) {
+      console.warn("Replacing existing function: ", functionName, "with:", fn);
+    }
+    ConditionUtil._customConditionFunctions[functionName] = fn;
+  }
+
+  public static resetCustomConditionFunctions() {
+    ConditionUtil._customConditionFunctions = {};
+  }
+  
+  public static getCustomConditionFunctions() {
+    return ConditionUtil._customConditionFunctions;
+  }
+
+  public static setCustomConditionFunctions(
+    customConditionFunctions: IDictionary<IFunctionCondition> = {}
+  ) {
+    for (let conditionFnName in customConditionFunctions) {
+      ConditionUtil.registerCustomConditionFunction(
+        conditionFnName,
+        customConditionFunctions[conditionFnName]
+      );
+    }
+  }
+
+  public static validateCondition(condition) {
+    if (!condition) {
+      return;
+    }
+
+    if (typeof condition === "function") {
+      return;
+    }
+
+    if (typeof condition === "string") {
+      if (!ConditionUtil._customConditionFunctions[condition]) {
+        throw new AccessControlError(
+          `Condition function: ${condition} not found`
+        );
+      }
+      return;
+    }
+
+    if (typeof condition === "object") {
+      if (!condition.Fn || !(ConditionUtil[condition.Fn] || 
+        ConditionUtil._customConditionFunctions[condition.Fn])) {
+        throw new AccessControlError(
+          `Condition function:${condition.Fn} is not valid`
+        );
+      }
+      return;
+    }
+  }
+
+  public static evaluate(
+    condition: ICondition,
+    context: any
+  ): boolean | Promise<boolean> {
+    if (!condition) {
+      return true;
+    }
+
+    if (typeof condition === "function") {
+      return condition(context);
+    }
+
+    if (typeof condition === "string") {
+      if (!ConditionUtil._customConditionFunctions[condition]) {
+        throw new AccessControlError(
+          `Condition function: ${condition} not found`
+        );
+      }
+      return ConditionUtil._customConditionFunctions[condition](context);
+    }
+
+    if (typeof condition === "object") {
+      if (!condition.Fn) {
+        throw new AccessControlError(
+          `Condition function:${condition.Fn} is not valid`
+        );
+      }
+
+      if (ConditionUtil[condition.Fn]) {
+          return (ConditionUtil[condition.Fn] as IConditionFunction).evaluate(condition.args, context);
+      } else if(ConditionUtil._customConditionFunctions[condition.Fn]) {
+          return ConditionUtil._customConditionFunctions[condition.Fn](context, condition.args);
+      } else {
+        throw new AccessControlError(
+            `Condition function:${condition.Fn} is not found`
+          );
+      }
+    }
+
+    return false;
+  }
+
+  public static getValueByPath(context: any, valuePathOrValue: any) {
+    // Check if the value is JSONPath
+    if (
+      valuePathOrValue &&
+      typeof valuePathOrValue === "string" &&
+      valuePathOrValue.startsWith("$.")
+    ) {
+      let jsonPathVal = JSONPath({
+        path: valuePathOrValue,
+        json: context,
+        wrap: false,
+      });
+      if (Array.isArray(jsonPathVal)) {
+        jsonPathVal = flattendeep(jsonPathVal);
+      }
+      return jsonPathVal;
+    }
+    return valuePathOrValue;
+  }
 }
+
+// Expose getValueByPath only as public API
+export const getValueByPath = ConditionUtil.getValueByPath;

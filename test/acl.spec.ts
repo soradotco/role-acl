@@ -1,5 +1,6 @@
 
 const AccessControl = require('../src').AccessControl;
+const getValueByPath = require('../src').getValueByPath;
 
 function type(o) {
     return Object.prototype.toString.call(o).match(/\s(\w+)/i)[1].toLowerCase();
@@ -42,7 +43,7 @@ function throwsError(fn, errMsg?, errName?) {
 describe('Test Suite: Access Control', function () {
 
     // grant list fetched from DB (to be converted to a valid grants object)
-    let grantList = [
+    let grantList: any[] = [
         { role: 'admin', resource: 'video', action: 'create', attributes: ['*'] },
         { role: 'admin', resource: 'video', action: 'read', attributes: ['*'] },
         { role: 'admin', resource: 'video', action: 'update', attributes: ['*'] },
@@ -53,6 +54,12 @@ describe('Test Suite: Access Control', function () {
         { role: 'user', resource: 'video', action: 'update', attributes: ['*'] },
         { role: 'user', resource: 'video', action: 'delete', attributes: ['*'] }
     ];
+
+    let grantListWithExtendRoles = grantList.concat([
+        { role: 'editor', resource: 'post', action: 'create', attributes: ['*'] },
+        { role: 'editor', extend: ['user']},
+        { role: 'editor', resource: 'post', action: 'delete', attributes: ['*'] }
+    ]);
 
 
     // valid grants object
@@ -93,10 +100,16 @@ describe('Test Suite: Access Control', function () {
 
     let categorySportsCondition = { 'Fn': 'EQUALS', 'args': { 'category': 'sports' } };
     let categoryPoliticsCondition = { 'Fn': 'EQUALS', 'args': { 'category': 'politics' } };
+    let categoryHealthCondition = { 'Fn': 'EQUALS', 'args': { 'category': 'health' } };
+    let categoryBusinessCondition = { 'Fn': 'EQUALS', 'args': { 'category': 'business' } };
+
     let categorySportsContext = { category: 'sports' };
     let categoryPoliticsContext = { category: 'politics' };
-    let categoryCustomContextAllowed = { loginUserId: '1', resourceProfileId: '1' };
-    let categoryCustomContextNotAllowed = { loginUserId: '1', resourceProfileId: '2' };
+    let categoryHealthContext = { category: 'health' };
+    let categoryBusinessContext = { category: 'business' };
+
+    let customContextAllowed = { loginUserId: '1', resourceProfileId: '1' };
+    let customContextNotAllowed = { loginUserId: '1', resourceProfileId: '2' };
 
     let conditionalGrantList = [
         {
@@ -226,6 +239,15 @@ describe('Test Suite: Access Control', function () {
         // no role named moderator but this should work
         ac.removeRoles(['user', 'moderator']);
         expect(ac.getRoles().length).toEqual(0);
+    });
+
+    it('should add grants from flat list (db) with extendRoles', async function () {
+        let ac = this.ac;
+        ac.setGrants(grantListWithExtendRoles);
+        expect((ac.can('user').execute('create').sync().on('video')).granted).toBeTruthy();
+        expect((ac.can('editor').execute('create').sync().on('post')).granted).toBeTruthy();
+        expect((ac.can('editor').execute('create').sync().on('video')).granted).toBeTruthy();
+        expect((ac.can('editor').execute('delete').sync().on('post')).granted).toBeTruthy();
     });
 
 
@@ -503,6 +525,26 @@ describe('Test Suite: Access Control', function () {
     });
 
 
+    it('should grant access with equals conditions with null values', function() {
+        const ac = new AccessControl([{
+            role: 'user',
+            resource: 'task',
+            action: ['update'],
+            attributes: ['*'],
+            condition: {
+                Fn: 'AND',
+                args: [
+                    { 'Fn': 'EQUALS', 'args': { 'userId': '$.AssignedId' } },
+                    { 'Fn': 'EQUALS', 'args': { 'CompletedAt': null } }
+                ]
+            }
+        }]);
+        expect((ac.can('user').context({ 
+            AssignedId: 'abc123',
+            CompletedAt: null,
+            userId: 'abc123'
+        }).execute('update').sync().on('task')).granted).toEqual(true);
+    });
 
     it('should grant access with equals condition with list of values and check permissions ', async function () {
         const ac = this.ac;
@@ -689,7 +731,7 @@ describe('Test Suite: Access Control', function () {
         expect((ac.can('user').context({ category: 'tech' }).execute('create').sync().on('article')).granted).toEqual(true);
     });
 
-    it('should grant access with JSONPath context values with EQUALS condition', async function () {
+    it('should grant access with JSONPath context keys or values with EQUALS condition', async function () {
         const ac = this.ac;
         ac.grant('user').condition(
             {
@@ -702,6 +744,18 @@ describe('Test Suite: Access Control', function () {
             .execute('edit').on('article')).granted).toEqual(true);
         expect((await ac.can('user').context({ owner: 'tensult', requester: 'dilip' })
             .execute('edit').on('article')).granted).toEqual(false);
+
+        ac.grant('user').condition(
+                {
+                    Fn: 'EQUALS',
+                    args: {
+                        '$.request.initiator': '$.owner'
+                    }
+                }).execute('edit').on('article');
+            expect((await ac.can('user').context({ owner: 'dilip', request: {initiator: 'dilip' }})
+                .execute('edit').on('article')).granted).toEqual(true);
+            expect((await ac.can('user').context({ owner: 'tensult', request: {initiator: 'dilip' } })
+                .execute('edit').on('article')).granted).toEqual(false);
     });
 
     it('should grant access with JSONPath context values with EQUALS condition synchronously', function () {
@@ -725,7 +779,7 @@ describe('Test Suite: Access Control', function () {
             {
                 Fn: 'NOT_EQUALS',
                 args: {
-                    'requester': '$.owner'
+                    '$.requester': '$.owner'
                 }
             }).execute('approve').on('article');
         expect((await ac.can('user').context({ owner: 'dilip', requester: 'dilip' })
@@ -740,7 +794,7 @@ describe('Test Suite: Access Control', function () {
             {
                 Fn: 'NOT_EQUALS',
                 args: {
-                    'requester': '$.owner'
+                    '$.requester': '$.owner'
                 }
             }).execute('approve').on('article');
         expect((ac.can('user').context({ owner: 'dilip', requester: 'dilip' })
@@ -801,35 +855,325 @@ describe('Test Suite: Access Control', function () {
         throwsAccessControlError(() => { ac.can('user').context({ category: 'tech' }).execute('create').sync().on('article') });
     });
 
+    it('should support initializing ACL with custom named functions', async function () {
+        let conditionalGrantObjectWithCustomNamedFunction = {
+            grants: [
+                {
+                    role: 'user', resource: 'profile', action: ['create', 'edit'], attributes: ['*'],
+                    condition: "custom:isOwner"
+                }
+            ],
+            customConditionFunctions: {
+                isOwner: (context) => {
+                    return new Promise((resolve) => {
+                        setTimeout(() => {
+                            resolve(context.loginUserId === context.resourceProfileId);
+                        }, 200);
+                    });
+                }
+            }
+        };
+        const acUsingObj = new AccessControl(conditionalGrantObjectWithCustomNamedFunction.grants, conditionalGrantObjectWithCustomNamedFunction.customConditionFunctions);
+        expect((await acUsingObj.can('user').context(customContextAllowed)
+            .execute('create').on('profile')).granted).toEqual(true);
+        expect((await acUsingObj.can('user').context(customContextNotAllowed)
+            .execute('edit').on('profile')).granted).toEqual(false);
+    });
+
+    it('should support registering custom named functions', async function () {
+        let customConditionFunctions = {
+            isOwner: (context) => {
+                return new Promise((resolve) => {
+                    setTimeout(() => {
+                        resolve(context.loginUserId === context.resourceProfileId);
+                    }, 200);
+                });
+            }
+        }
+        const ac = new AccessControl();
+        ac.registerConditionFunction('isOwner', customConditionFunctions.isOwner);
+        ac.grant("user").condition('custom:isOwner').execute(['create', 'edit']).on('profile');
+        expect((await ac.can('user').context(customContextAllowed)
+            .execute('create').on('profile')).granted).toEqual(true);
+        expect((await ac.can('user').context(customContextNotAllowed)
+            .execute('edit').on('profile')).granted).toEqual(false);
+    });
+
+    it('should support registering custom named functions as condition object', async function () {
+        let customConditionFunctions = {
+            gte: (context, args) => {
+                return new Promise((resolve) => {
+                    setTimeout(() => {
+                        resolve(context.level >= args.level);
+                    }, 200);
+                });
+            }
+        }
+
+        const ac = new AccessControl();
+        ac.registerConditionFunction('gte', customConditionFunctions.gte);
+        ac.grant("user").condition({Fn:'custom:gte', args:{level: 2}}).execute(['comment']).on('article');
+        expect((await ac.can('user').context({level: 2})
+            .execute('comment').on('article')).granted).toEqual(true);
+        expect((await ac.can('user').context({level: 3})
+            .execute('comment').on('article')).granted).toEqual(true);
+        expect((await ac.can('user').context({level: 1})
+            .execute('comment').on('article')).granted).toEqual(false);
+    });
+
+    it('should have valid basic custom condition example in the docs', function () {
+        // 1. Define the condition handler
+        const greaterOrEqual = (context, args) => {
+            if (!args || typeof args.level !== 'number') {
+                throw new Error('custom:gte requires "level" argument');
+            }
+
+            return +context.level >= args.level;
+        }
+
+        const ac = new AccessControl();
+
+        // 2. Register the handler with appropriate name
+        ac.registerConditionFunction('gte', greaterOrEqual);
+
+        // 3. Use it in grants, same as core conditions but with "custom:" prefix
+        ac.grant('user')
+            .condition({
+                Fn: 'custom:gte',
+                args: { level: 2 }
+            })
+            .execute('comment').on('article');
+
+        // 4. Evaluate permissions with appropraite context (sync) - same as core conditions
+        const permission1 = ac
+            .can('user')
+            .context({ level: 2 })
+            .execute('comment')
+            .sync()
+            .on('article');
+
+        // prints "LEVEL 2 true"
+        expect(permission1.granted).toEqual(true);
+
+        const permission2 = ac
+            .can('user')
+            .context({ level: 1 })
+            .execute('comment')
+            .sync()
+            .on('article');
+
+        // prints "LEVEL 1 false"
+        expect(permission2.granted).toEqual(false);
+    });
+
+    it('should have valid no arguments custom condition example in the docs', function () {
+        const myConditions = {
+            isArticleOwner: (context) => {
+                return context.loginUserId && context.loginUserId === context.articleOwnerId
+            }
+        }
+        const ac = new AccessControl();
+        ac.registerConditionFunction('isArticleOwner', myConditions.isArticleOwner);
+        ac.grant("user").condition('custom:isArticleOwner').execute(['delete', 'update']).on('article');
+
+        expect(
+            ac.can('user').context({ loginUserId: 1, articleOwnerId: 1 })
+                .execute('update').sync().on('article').granted
+        ).toBe(true);
+    });
+
+    it('should have valid async custom condition example in the docs', async function () {
+        const asyncCheckResourceForUser = (resource, loginUserId, record) => new Promise((resolve) => {
+            resolve(resource === 'article' && loginUserId === 1 && record.id === 10);
+        });
+
+        const myConditions = {
+            isResourceOwner: async (context, args) => {
+                const { resource } = args || {};
+                const { loginUserId } = context;
+                return asyncCheckResourceForUser(resource, loginUserId, context[resource]);
+            }
+        }
+        const ac = new AccessControl();
+        ac.registerConditionFunction('isResourceOwner', myConditions.isResourceOwner);
+
+        ac.grant("user")
+            .condition({ Fn: 'custom:isResourceOwner', args: { resource: 'article' } })
+            .execute(['delete', 'update'])
+            .on('article');
+
+        expect(
+            (await ac.can('user').context({ loginUserId: 1, article: { id: 10 } })
+                .execute('update').on('article'))
+            .granted
+        ).toBe(true);
+        expect(
+            (await ac.can('user').context({ loginUserId: 2, article: { id: 10 } })
+                .execute('update').on('article'))
+            .granted
+        ).toBe(false);
+    });
+
+    it('should have valid serialization and batch register custom conditions example in the docs', async function () {
+        const myPolicy = {
+            // Serialized policy, can be stored in file, DB, etc
+            grants: [
+                {
+                    role: 'user',
+                    resource: 'profile',
+                    action: ['delete', 'update'],
+                    attributes: ['*'],
+                    condition: {
+                        Fn: 'custom:isResourceOwner',
+                        args: { resource: 'profile' }
+                    }
+                },
+                {
+                    role: 'user',
+                    resource: 'article',
+                    action: ['delete', 'update'],
+                    attributes: ['*'],
+                    condition: {
+                        Fn: 'custom:isResourceOwner',
+                        args: { resource: 'article' }
+                    }
+                },
+            ],
+            // Map your custom conditions to the serialized policy
+            myConditions: {
+                isResourceOwner: async ({ user, record }, { resource }) => {
+                    if (resource === 'profile' && user.id === 1 && record.id === 1) {
+                        return true;
+                    }
+                    if (resource === 'article' && user.id === 1 && record.id === 2) {
+                        return true;
+                    }
+                    return false;
+                }
+            }
+        };
+
+        // Register everything on initialization
+        const ac = new AccessControl(myPolicy.grants, myPolicy.myConditions);
+
+        // Use it
+        expect(
+            (await ac.can('user').context({ user: { id: 1 }, record: { id: 1 } })
+                .execute('update').on('profile')).granted
+        ).toBe(true); // granted === true
+
+        expect(
+            (await ac.can('user').context({ user: { id: 1 }, record: { id: 1 } })
+                .execute('delete').on('article')).granted
+        ).toBe(false);  // granted === false
+        
+        expect(
+            (await ac.can('user').context({ user: { id: 1 }, record: { id: 2 } })
+                .execute('delete').on('article')).granted
+        ).toBe(true);  // granted === true
+    });
+
+    it('should have valid mix custom and core conditions and use JSON path helper example in the docs', async function () {
+        const myPolicy = {
+            // Mix custom with core conditions
+            grants: [
+                {
+                    role: 'editor/news',
+                    resource: 'article',
+                    action: 'approve',
+                    attributes: ['*'],
+                    condition: {
+                        Fn: 'AND',
+                        args: [
+                            {
+                                Fn: 'custom:categoryMatcher',
+                                args: { type: 'news' }
+                            },
+                            {
+                                Fn: 'custom:isResourceOwner',
+                                args: { resource: 'article' }
+                            }
+                        ]
+                    }
+                },
+            ],
+            myConditions: {
+                categoryMatcher: (context, { type }) => {
+                    // A naive use of the JSON path util
+                    // Keep in mind it comes with performance penalties
+                    return type && getValueByPath(context, '$.category.type') === type;
+                },
+                isResourceOwner: (context, { resource }) => {
+                    if (!resource) {
+                        return false;
+                    }
+                    return getValueByPath(context, `$.${resource}.owner`) === getValueByPath(context, '$.user.id');
+                },
+            }
+        };
+        // Register everything on initialization
+        const ac = new AccessControl(myPolicy.grants, myPolicy.myConditions);
+
+        // Use it
+        expect(
+            (await ac.can('editor/news').context({ user: { id: 1 }, article: { owner: 1 }, category: { type: 'news' } })
+                .execute('approve').on('article')).granted
+        ).toBe(true); // granted === true
+
+        expect(
+            (await ac.can('editor/news').context({ user: { id: 1 }, article: { owner: 2 }, category: { type: 'news' } })
+                .execute('approve').on('article')).granted
+        ).toBe(false);  // granted === false
+        
+        expect(
+            (await ac.can('editor/news').context({ user: { id: 1 }, article: { owner: 1 }, category: { type: 'tutorials' } })
+                .execute('approve').on('article')).granted
+        ).toBe(false);  // granted === false
+    });
+
+    it('should validate custom named functions as condition object', async function () {
+        const ac = new AccessControl();
+        expect(() => 
+        ac.grant("user").condition({Fn:'custom:gte', args:{level: 2}})
+        .execute(['comment']).on('article')).toThrow();
+    });
+
+    it('should validate custom named functions as condition string', async function () {
+        const ac = new AccessControl();
+        expect(() => 
+        ac.grant("user").condition('custom:gte')
+        .execute(['comment']).on('article')).toThrow();
+    });
+
     it('should support initializing ACL when grants has custom functions', async function () {
         // Using object
         const acUsingObj = new AccessControl(conditionalGrantObjectWithCustomAsyncFunction);
-        expect((await acUsingObj.can('sports/custom').context(categoryCustomContextAllowed)
+        expect((await acUsingObj.can('sports/custom').context(customContextAllowed)
             .execute('create').on('profile')).granted).toEqual(true);
-        expect((await acUsingObj.can('sports/custom').context(categoryCustomContextNotAllowed)
+        expect((await acUsingObj.can('sports/custom').context(customContextNotAllowed)
             .execute('edit').on('profile')).granted).toEqual(false);
 
         // Using array
         const acUsingArray = new AccessControl(conditionalGrantArrayWithCustomAsyncFunction);
-        expect((await acUsingArray.can('sports/custom').context(categoryCustomContextAllowed)
+        expect((await acUsingArray.can('sports/custom').context(customContextAllowed)
             .execute('create').on('profile')).granted).toEqual(true);
-        expect((await acUsingArray.can('sports/custom').context(categoryCustomContextNotAllowed)
+        expect((await acUsingArray.can('sports/custom').context(customContextNotAllowed)
             .execute('edit').on('profile')).granted).toEqual(false);
     });
 
     it('should support initializing ACL when grants has custom functions synchronously', function () {
         // Using object
         const acUsingObj = new AccessControl(conditionalGrantObjectWithCustomSyncFunction);
-        expect((acUsingObj.can('sports/custom').context(categoryCustomContextAllowed)
+        expect((acUsingObj.can('sports/custom').context(customContextAllowed)
             .execute('create').sync().on('profile')).granted).toEqual(true);
-        expect((acUsingObj.can('sports/custom').context(categoryCustomContextNotAllowed)
+        expect((acUsingObj.can('sports/custom').context(customContextNotAllowed)
             .execute('edit').sync().on('profile')).granted).toEqual(false);
 
         // Using array
         const acUsingArray = new AccessControl(conditionalGrantArrayWithCustomSyncFunction);
-        expect((acUsingArray.can('sports/custom').context(categoryCustomContextAllowed)
+        expect((acUsingArray.can('sports/custom').context(customContextAllowed)
             .execute('create').sync().on('profile')).granted).toEqual(true);
-        expect((acUsingArray.can('sports/custom').context(categoryCustomContextNotAllowed)
+        expect((acUsingArray.can('sports/custom').context(customContextNotAllowed)
             .execute('edit').sync().on('profile')).granted).toEqual(false);
     });
 
@@ -848,6 +1192,27 @@ describe('Test Suite: Access Control', function () {
         expect((await newAC.can('user').context(categorySportsContext).execute('create').on('article')).granted).toEqual(true);
         expect((await newAC.can('user').context(categoryPoliticsContext).execute('create').on('article')).granted).toEqual(false);
         expect((await newAC.can('user').context({ category: 'tech' }).execute('create').on('article')).granted).toEqual(true);
+    });
+
+    it('should stringfy and restore ACL with async custom named condition function', async function () {
+        let customConditionFunctions = {
+            isOwner: (context) => {
+                return new Promise((resolve) => {
+                    setTimeout(() => {
+                        resolve(context.loginUserId === context.resourceProfileId);
+                    }, 200);
+                });
+            }
+        }
+        const ac = new AccessControl();
+        ac.registerConditionFunction('isOwner', customConditionFunctions.isOwner);
+        ac.grant("user").condition('custom:isOwner').execute(['create', 'edit']).on('profile');
+        const newAC = AccessControl.fromJSON(ac.toJSON());
+        expect(ac.toJSON()).toEqual(newAC.toJSON());
+        expect((await newAC.can('user').context(customContextAllowed)
+            .execute('create').on('profile')).granted).toEqual(true);
+        expect((await newAC.can('user').context(customContextNotAllowed)
+            .execute('edit').on('profile')).granted).toEqual(false);
     });
 
     it('should stringfy and restore ACL with sync custom condition function', function () {
@@ -1072,10 +1437,10 @@ describe('Test Suite: Access Control', function () {
             {
                 Fn: 'STARTS_WITH',
                 args: {
-                    tags: 'sports'
+                    tags: '$.category'
                 }
             }).execute('create').on('article');
-        expect((ac.can('user').context({ tags: 'sports' }).execute('create').sync().on('article')).granted).toEqual(true);
+        expect((ac.can('user').context({ tags: 'sports', category: 'sports'  }).execute('create').sync().on('article')).granted).toEqual(true);
         expect((ac.can('user').context({ tags: 'politics' }).execute('create').sync().on('article')).granted).toEqual(false);
     });
 
@@ -1086,11 +1451,11 @@ describe('Test Suite: Access Control', function () {
             {
                 Fn: 'STARTS_WITH',
                 args: {
-                    tags: ['sports', 'politics']
+                    tags: ['$.mainCategory', '$.subCategory']
                 }
             }).execute('create').on('article');
-        expect((await ac.can('user').context({ tags: 'sports' }).execute('create').on('article')).granted).toEqual(true);
-        expect((await ac.can('user').context({ tags: 'politics' }).execute('create').on('article')).granted).toEqual(true);
+        expect((await ac.can('user').context({ tags: 'sports', mainCategory: 'sports' }).execute('create').on('article')).granted).toEqual(true);
+        expect((await ac.can('user').context({ tags: 'politics', subCategory: 'politics' }).execute('create').on('article')).granted).toEqual(true);
         expect((await ac.can('user').context({ tags: 'tech' }).execute('create').on('article')).granted).toEqual(false);
     });
 
@@ -1101,11 +1466,11 @@ describe('Test Suite: Access Control', function () {
             {
                 Fn: 'STARTS_WITH',
                 args: {
-                    tags: ['sports', 'politics']
+                    '$.tags': ['$.mainCategory', '$.subCategory']
                 }
             }).execute('create').on('article');
-        expect((ac.can('user').context({ tags: 'sports' }).execute('create').sync().on('article')).granted).toEqual(true);
-        expect((ac.can('user').context({ tags: 'politics' }).execute('create').sync().on('article')).granted).toEqual(true);
+        expect((ac.can('user').context({ tags: 'sports', mainCategory: 'sports' }).execute('create').sync().on('article')).granted).toEqual(true);
+        expect((ac.can('user').context({ tags: 'politics', subCategory: 'politics' }).execute('create').sync().on('article')).granted).toEqual(true);
         expect((ac.can('user').context({ tags: 'tech' }).execute('create').sync().on('article')).granted).toEqual(false);
     });
 
@@ -1116,7 +1481,7 @@ describe('Test Suite: Access Control', function () {
             {
                 Fn: 'LIST_CONTAINS',
                 args: {
-                    tags: ['sports', 'politics']
+                    '$.tags': ['sports', 'politics']
                 }
             }).execute('create').on('article');
         expect((await ac.can('user').context({ tags: ['sports'] }).execute('create').on('article')).granted).toEqual(true);
@@ -1427,9 +1792,9 @@ describe('Test Suite: Access Control', function () {
         let ac = this.ac;
         ac.grant('user').condition(categorySportsCondition).execute('create').on('article');
         ac.grant('user').execute('*').on('image');
-        await ac.extendRole('admin', 'user');
+        ac.extendRole('admin', 'user');
         ac.grant('admin').execute('*').on('category');
-        await ac.extendRole('owner', 'admin');
+        ac.extendRole('owner', 'admin');
         ac.grant('owner').execute('*').on('video');
 
         expect((await ac.allowedResources({ role: 'user' })).sort()).toEqual(['article', 'image']);
@@ -1444,9 +1809,9 @@ describe('Test Suite: Access Control', function () {
         let ac = this.ac;
         ac.grant('user').condition(categorySportsCondition).execute('create').on('article');
         ac.grant('user').execute('*').on('image');
-        ac.extendRoleSync('admin', 'user');
+        ac.extendRole('admin', 'user');
         ac.grant('admin').execute('*').on('category');
-        ac.extendRoleSync('owner', 'admin');
+        ac.extendRole('owner', 'admin');
         ac.grant('owner').execute('*').on('video');
 
         expect((ac.allowedResourcesSync({ role: 'user' })).sort()).toEqual(['article', 'image']);
@@ -1461,10 +1826,10 @@ describe('Test Suite: Access Control', function () {
         let ac = this.ac;
         ac.grant('user').condition(categorySportsCondition).execute('create').on('article');
         ac.grant('user').execute('*').on('image');
-        await ac.extendRole('admin', 'user');
+        ac.extendRole('admin', 'user');
         ac.grant('admin').execute('delete').on('article');
         ac.grant('admin').execute('*').on('category');
-        await ac.extendRole('owner', 'admin');
+        ac.extendRole('owner', 'admin');
         ac.grant('owner').execute('*').on('video');
 
         expect((await ac.allowedActions({ role: 'user', resource: 'article' })).sort()).toEqual(['create']);
@@ -1480,10 +1845,10 @@ describe('Test Suite: Access Control', function () {
         let ac = this.ac;
         ac.grant('user').condition(categorySportsCondition).execute('create').on('article');
         ac.grant('user').execute('*').on('image');
-        ac.extendRoleSync('admin', 'user');
+        ac.extendRole('admin', 'user');
         ac.grant('admin').execute('delete').on('article');
         ac.grant('admin').execute('*').on('category');
-        ac.extendRoleSync('owner', 'admin');
+        ac.extendRole('owner', 'admin');
         ac.grant('owner').execute('*').on('video');
 
         expect((ac.allowedActionsSync({ role: 'user', resource: 'article' })).sort()).toEqual(['create']);
@@ -1501,10 +1866,10 @@ describe('Test Suite: Access Control', function () {
         ac.setGrants(conditionalGrantObject);
         ac.grant('user').condition(categorySportsCondition).execute('create').on('blog');
         ac.grant('user').execute('*').on('image');
-        await ac.extendRole('sports/editor', 'user');
-        await ac.extendRole('admin', 'user');
+        ac.extendRole('sports/editor', 'user');
+        ac.extendRole('admin', 'user');
         ac.grant('admin').execute('*').on('category');
-        await ac.extendRole('owner', 'admin');
+        ac.extendRole('owner', 'admin');
         ac.grant('owner').execute('*').on('video');
         ac.grant('owner').execute('*').on('role');
 
@@ -1538,10 +1903,10 @@ describe('Test Suite: Access Control', function () {
         ac.setGrants(conditionalGrantObject);
         ac.grant('user').condition(categorySportsCondition).execute('create').on('blog');
         ac.grant('user').execute('*').on('image');
-        ac.extendRoleSync('sports/editor', 'user');
-        ac.extendRoleSync('admin', 'user');
+        ac.extendRole('sports/editor', 'user');
+        ac.extendRole('admin', 'user');
         ac.grant('admin').execute('*').on('category');
-        ac.extendRoleSync('owner', 'admin');
+        ac.extendRole('owner', 'admin');
         ac.grant('owner').execute('*').on('video');
         ac.grant('owner').execute('*').on('role');
 
@@ -1717,12 +2082,12 @@ describe('Test Suite: Access Control', function () {
         let ac = this.ac;
 
         ac.grant('admin').execute('create').on('book');
-        await ac.extendRole('onur', 'admin');
+        ac.extendRole('onur', 'admin');
         expect(ac.getGrants().onur.$extend['admin']).toEqual({ condition: undefined });
 
         ac.grant('role2, role3, editor, viewer, agent').execute('create').on('book');
 
-        await ac.extendRole('onur', ['role2', 'role3']);
+        ac.extendRole('onur', ['role2', 'role3']);
         expect(Object.keys(ac.getGrants().onur.$extend).sort()).toEqual(['admin', 'role2', 'role3']);
 
         await ac.grant('admin').extend('editor');
@@ -1737,20 +2102,20 @@ describe('Test Suite: Access Control', function () {
         expect(ac.getGrants().agent).toBeUndefined();
         expect(ac.getGrants().admin.$extend['editor']).toBeUndefined();
         expect(ac.getGrants().admin.$extend['agent']).toBeUndefined();
-        await promiseThrowsError(ac.grant('roleX').extend('roleX'));
-        await promiseThrowsError(ac.grant(['admin2', 'roleX']).extend(['roleX', 'admin3']));
+        throwsAccessControlError(() => ac.grant('roleX').extend('roleX'));
+        throwsAccessControlError(() =>ac.grant(['admin2', 'roleX']).extend(['roleX', 'admin3']));
     });
 
     it('should extend / remove roles synchronously', function () {
         let ac = this.ac;
 
         ac.grant('admin').execute('create').on('book');
-        ac.extendRoleSync('onur', 'admin');
+        ac.extendRole('onur', 'admin');
         expect(ac.getGrants().onur.$extend['admin']).toEqual({ condition: undefined });
 
         ac.grant('role2, role3, editor, viewer, agent').execute('create').on('book');
 
-        ac.extendRoleSync('onur', ['role2', 'role3']);
+        ac.extendRole('onur', ['role2', 'role3']);
         expect(Object.keys(ac.getGrants().onur.$extend).sort()).toEqual(['admin', 'role2', 'role3']);
 
         ac.grant('admin').extendSync('editor');
@@ -1769,22 +2134,22 @@ describe('Test Suite: Access Control', function () {
         throwsError(() => ac.grant(['admin2', 'roleX']).extendSync(['roleX', 'admin3']));
     });
 
-    it('should throw error while trying extend own role', async function () {
+    it('should throw error while trying extend own role', function () {
         let ac = this.ac;
         ac.grant('user').execute('create').when(categorySportsCondition).on('book');
-        await ac.extendRole('editor', 'user');
+        ac.extendRole('editor', 'user');
         ac.grant('editor').execute('delete').on('book');
-        await promiseThrowsError(ac.extendRole('user', 'editor'));
-        await promiseThrowsError(ac.extendRole('user', 'user'));
+        throwsAccessControlError(() => ac.extendRole('user', 'editor'));
+        throwsAccessControlError(() => ac.extendRole('user', 'user'));
     });
 
     it('should throw error while trying extend own role synchronously', function () {
         let ac = this.ac;
         ac.grant('user').execute('create').when(categorySportsCondition).on('book');
-        ac.extendRoleSync('editor', 'user');
+        ac.extendRole('editor', 'user');
         ac.grant('editor').execute('delete').on('book');
-        throwsError(() => ac.extendRoleSync('user', 'editor'));
-        throwsError(() => ac.extendRoleSync('user', 'user'));
+        throwsError(() => ac.extendRole('user', 'editor'));
+        throwsError(() => ac.extendRole('user', 'user'));
     });
 
 
@@ -1806,7 +2171,7 @@ describe('Test Suite: Access Control', function () {
         };
         ac.grant(sportsEditorGrant);
         ac.grant(politicsEditorGrant);
-        await ac.extendRole('editor', ['sports/editor', 'politics/editor']);
+        ac.extendRole('editor', ['sports/editor', 'politics/editor']);
         expect((await ac.can('editor').context(categorySportsContext).execute('create').on('post')).granted).toEqual(true);
         expect((await ac.can('editor').context(categoryPoliticsContext).execute('create').on('post')).granted).toEqual(true);
     });
@@ -1829,9 +2194,57 @@ describe('Test Suite: Access Control', function () {
         };
         ac.grant(sportsEditorGrant);
         ac.grant(politicsEditorGrant);
-        ac.extendRoleSync('editor', ['sports/editor', 'politics/editor']);
+        ac.extendRole('editor', ['sports/editor', 'politics/editor']);
         expect((ac.can('editor').context(categorySportsContext).execute('create').sync().on('post')).granted).toEqual(true);
         expect((ac.can('editor').context(categoryPoliticsContext).execute('create').sync().on('post')).granted).toEqual(true);
+    });
+
+    it('should extend roles and reflect the changes done to original role used synchronously', function () {
+        let ac = this.ac;
+        let sportsEditorGrant = {
+            role: 'news/editor',
+            resource: 'post',
+            action: 'create', // action
+            attributes: ['*'], // grant only
+            condition: categorySportsCondition
+        };
+        let politicsEditorGrant = {
+            role: 'news/editor',
+            resource: 'post',
+            action: 'create', // action
+            attributes: ['*'], // grant only
+            condition: categoryPoliticsCondition
+        };
+        
+        ac.grant(sportsEditorGrant);
+        ac.grant(politicsEditorGrant);
+
+        let businessEditorGrant = {
+            role: 'editor',
+            resource: 'post',
+            action: 'create', // action
+            attributes: ['*'], // grant only
+            condition: categoryBusinessCondition
+        };
+        ac.grant(businessEditorGrant);
+
+        ac.extendRole('editor', ['news/editor']);
+        expect((ac.can('editor').context(categorySportsContext).execute('create').sync().on('post')).granted).toEqual(true);
+        expect((ac.can('editor').context(categoryPoliticsContext).execute('create').sync().on('post')).granted).toEqual(true);
+        expect((ac.can('editor').context(categoryBusinessContext).execute('create').sync().on('post')).granted).toEqual(true);
+
+        // Add more permissions to original role
+        let healthEditorGrant = {
+            role: 'news/editor',
+            resource: 'post',
+            action: 'create', // action
+            attributes: ['*'], // grant only
+            condition: categoryHealthCondition
+        };
+
+        ac.grant(healthEditorGrant);
+
+        expect((ac.can('editor').context(categoryHealthContext).execute('create').sync().on('post')).granted).toEqual(true);
     });
 
     it('should extend roles with conditions', async function () {
@@ -1843,8 +2256,8 @@ describe('Test Suite: Access Control', function () {
             attributes: ['*'] // grant only
         };
         ac.grant(editorGrant);
-        await ac.extendRole('sports/editor', 'editor', categorySportsCondition);
-        await ac.extendRole('politics/editor', 'editor', categoryPoliticsCondition);
+        ac.extendRole('sports/editor', 'editor', categorySportsCondition);
+        ac.extendRole('politics/editor', 'editor', categoryPoliticsCondition);
 
         expect((await ac.can('editor').execute('create').on('post')).granted).toEqual(true);
         expect((await ac.can('editor').context(categorySportsContext).execute('create').on('post')).granted).toEqual(true);
@@ -1864,8 +2277,8 @@ describe('Test Suite: Access Control', function () {
             attributes: ['*'] // grant only
         };
         ac.grant(editorGrant);
-        ac.extendRoleSync('sports/editor', 'editor', categorySportsCondition);
-        ac.extendRoleSync('politics/editor', 'editor', categoryPoliticsCondition);
+        ac.extendRole('sports/editor', 'editor', categorySportsCondition);
+        ac.extendRole('politics/editor', 'editor', categoryPoliticsCondition);
 
         expect((ac.can('editor').execute('create').sync().on('post')).granted).toEqual(true);
         expect((ac.can('editor').context(categorySportsContext).execute('create').sync().on('post')).granted).toEqual(true);
@@ -1887,16 +2300,16 @@ describe('Test Suite: Access Control', function () {
         };
         ac.grant(editorGrant);
         // first level of extension
-        await ac.extendRole('sports/editor', 'editor', categorySportsCondition);
-        await ac.extendRole('politics/editor', 'editor', categoryPoliticsCondition);
+        ac.extendRole('sports/editor', 'editor', categorySportsCondition);
+        ac.extendRole('politics/editor', 'editor', categoryPoliticsCondition);
 
         // second level of extension
-        await ac.extendRole('sports-and-politics/editor', ['sports/editor', 'politics/editor']);
+        ac.extendRole('sports-and-politics/editor', ['sports/editor', 'politics/editor']);
         expect((await ac.can('sports-and-politics/editor').context(categorySportsContext).execute('create').on('post')).granted).toEqual(true);
         expect((await ac.can('sports-and-politics/editor').context(categoryPoliticsContext).execute('create').on('post')).granted).toEqual(true);
 
         // third level of extension
-        await ac.extendRole('conditonal/sports-and-politics/editor', 'sports-and-politics/editor', {
+        ac.extendRole('conditonal/sports-and-politics/editor', 'sports-and-politics/editor', {
             Fn: 'EQUALS',
             args: { status: 'draft' }
         });
@@ -1927,16 +2340,16 @@ describe('Test Suite: Access Control', function () {
         };
         ac.grant(editorGrant);
         // first level of extension
-        ac.extendRoleSync('sports/editor', 'editor', categorySportsCondition);
-        ac.extendRoleSync('politics/editor', 'editor', categoryPoliticsCondition);
+        ac.extendRole('sports/editor', 'editor', categorySportsCondition);
+        ac.extendRole('politics/editor', 'editor', categoryPoliticsCondition);
 
         // second level of extension
-        ac.extendRoleSync('sports-and-politics/editor', ['sports/editor', 'politics/editor']);
+        ac.extendRole('sports-and-politics/editor', ['sports/editor', 'politics/editor']);
         expect((ac.can('sports-and-politics/editor').context(categorySportsContext).execute('create').sync().on('post')).granted).toEqual(true);
         expect((ac.can('sports-and-politics/editor').context(categoryPoliticsContext).execute('create').sync().on('post')).granted).toEqual(true);
 
         // third level of extension
-        ac.extendRoleSync('conditonal/sports-and-politics/editor', 'sports-and-politics/editor', {
+        ac.extendRole('conditonal/sports-and-politics/editor', 'sports-and-politics/editor', {
             Fn: 'EQUALS',
             args: { status: 'draft' }
         });
@@ -1966,8 +2379,8 @@ describe('Test Suite: Access Control', function () {
             attributes: ['*'] // grant only
         };
         ac.grant(editorGrant);
-        await ac.extendRole('sports/editor', 'editor', categorySportsCondition);
-        await ac.extendRole('politics/editor', 'editor', categoryPoliticsCondition);
+        ac.extendRole('sports/editor', 'editor', categorySportsCondition);
+        ac.extendRole('politics/editor', 'editor', categoryPoliticsCondition);
 
         ac.removeRoles('editor');
         expect((await ac.can('sports/editor').context(categoryPoliticsContext).execute('create').on('post')).granted).toEqual(false);
@@ -1983,8 +2396,8 @@ describe('Test Suite: Access Control', function () {
             attributes: ['*'] // grant only
         };
         ac.grant(editorGrant);
-        ac.extendRoleSync('sports/editor', 'editor', categorySportsCondition);
-        ac.extendRoleSync('politics/editor', 'editor', categoryPoliticsCondition);
+        ac.extendRole('sports/editor', 'editor', categorySportsCondition);
+        ac.extendRole('politics/editor', 'editor', categoryPoliticsCondition);
 
         ac.removeRoles('editor');
         expect((ac.can('sports/editor').context(categoryPoliticsContext).execute('create').sync().on('post')).granted).toEqual(false);
